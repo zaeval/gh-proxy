@@ -1,0 +1,23 @@
+{
+  "name": "gh-proxy",
+  "version": "1.0.0",
+  "description": "Zero-dependency relay/proxy server that lets machines without direct GitHub access use gh, git and the GitHub REST/GraphQL API.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "github",
+    "proxy",
+    "gh",
+    "api.github.com",
+    "relay",
+    "air-gapped"
+  ],
+  "author": "zaeval",
+  "license": "MIT"
+}

@@ -494,13 +494,16 @@ function handleUpstreamResponse(ctx, upRes) {
 /* ------------------------------------------------------------------ */
 
 function handleServiceInfo(res) {
+  const publicHasPath = new URL(PUBLIC_BASE).pathname !== '/';
   sendJson(res, 200, {
     name: 'gh-proxy',
     version: VERSION,
     public_base: PUBLIC_BASE,
     auth_required: Boolean(cfg.proxyToken),
     endpoints: {
-      forward_proxy: `Set HTTPS_PROXY=${PUBLIC_BASE} (CONNECT tunnel, gh/git work unmodified)`,
+      forward_proxy: publicHasPath
+        ? 'CONNECT tunnel is not available through a path-prefixed deployment — use the REST/git endpoints below, or connect directly to the proxy port for HTTPS_PROXY mode'
+        : `Set HTTPS_PROXY=${PUBLIC_BASE} (CONNECT tunnel, gh/git work unmodified)`,
       rest: `${PUBLIC_BASE}/api/v3/{path}`,
       graphql: `${PUBLIC_BASE}/api/graphql`,
       uploads: `${PUBLIC_BASE}/api/uploads/{path}`,
@@ -769,6 +772,10 @@ server.listen(cfg.port, cfg.bindHost, () => {
   console.log(`  allowlist   : ${ALLOWED_HOSTS.join(', ')}`);
   console.log('');
   console.log('  Client quick start:');
-  console.log(`    HTTPS_PROXY=${PUBLIC_BASE}  gh api rate_limit`);
+  if (new URL(PUBLIC_BASE).pathname === '/') {
+    console.log(`    HTTPS_PROXY=${PUBLIC_BASE}  gh api rate_limit`);
+  } else {
+    console.log(`    curl ${PUBLIC_BASE}/api/v3/rate_limit   (path-prefixed deployment: CONNECT/HTTPS_PROXY unavailable)`);
+  }
   console.log(`    curl ${PUBLIC_BASE}/healthz`);
 });

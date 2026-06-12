@@ -13,8 +13,12 @@ is reachable. Route all GitHub traffic through it.
 
 Resolve the proxy base URL in this order:
 
-1. `GH_PROXY_URL` environment variable (e.g. `http://proxy.internal:8788`)
-2. Ask the user for the proxy host/port
+1. `GH_PROXY_URL` environment variable — may be a bare host
+   (`http://proxy.internal:8788`) or include a path prefix when the proxy
+   sits behind a fronting web server (`https://example.com/proxy/gh`)
+2. Ask the user for the proxy URL
+
+If the proxy requires a token, it is in `GH_PROXY_TOKEN` (or ask the user).
 
 Verify it is alive (no auth needed):
 
@@ -23,9 +27,15 @@ curl -s $GH_PROXY_URL/healthz
 # {"status":"ok",...}  — add ?upstream=1 to also check proxy→GitHub connectivity
 ```
 
-`curl -s $GH_PROXY_URL/` lists all available endpoints.
+`curl -s $GH_PROXY_URL/` lists all available endpoints and tells you whether
+auth is required (`auth_required`) and whether CONNECT mode is available
+(`endpoints.forward_proxy`).
 
-## 2. Preferred method: HTTPS_PROXY (gh and git work unmodified)
+## 2. HTTPS_PROXY method (gh and git work unmodified)
+
+**Only when `GH_PROXY_URL` has NO path component.** A URL with a path prefix
+(e.g. `https://example.com/proxy/gh`) cannot be used as `HTTPS_PROXY` — skip
+to section 3 in that case.
 
 Set the proxy for the current process only — do NOT change machine-wide
 settings unless the user asks:
@@ -51,9 +61,10 @@ will fail with `403` from the proxy. That is expected.
 If the proxy requires a token (`407 Proxy Authentication Required`), embed it:
 `HTTPS_PROXY=http://x:<PROXY_TOKEN>@proxy.internal:8788`.
 
-## 3. Alternative: direct REST/GraphQL/git paths (no proxy env needed)
+## 3. Direct REST/GraphQL/git paths (works with any GH_PROXY_URL)
 
-The proxy mirrors GitHub under these paths:
+This is the primary method when the proxy is behind a path prefix
+(`https://example.com/proxy/gh`). The proxy mirrors GitHub under these paths:
 
 | Path on proxy | Upstream |
 |---|---|
@@ -75,7 +86,10 @@ Notes:
   back at the proxy — follow them as-is.
 - Tarball/zipball redirects (codeload) are followed server-side; you get the
   bytes directly with `curl -o file.tar.gz .../api/v3/repos/o/r/tarball`.
-- If the proxy has a token configured, add `-H "X-Proxy-Token: <token>"`.
+- If the proxy has a token configured (`GH_PROXY_TOKEN`):
+  - curl: add `-H "X-Proxy-Token: $GH_PROXY_TOKEN"`
+  - git: `git -c http.extraheader="X-Proxy-Token: $GH_PROXY_TOKEN" clone ...`
+    (or set it once per repo: `git config http.extraheader "X-Proxy-Token: ..."`)
 
 ## 4. gh authentication on this machine
 
@@ -93,7 +107,7 @@ The browser here cannot reach github.com, so:
 |---|---|
 | `curl $GH_PROXY_URL/healthz` fails | Proxy down or wrong host/port — ask the user |
 | `healthz?upstream=1` → `"reachable": false` | Proxy server itself lost GitHub access |
-| `407` on CONNECT / `401` JSON with `X-Gh-Proxy-Error: PROXY_AUTH_REQUIRED` | Proxy token required — get `PROXY_TOKEN` from the user |
+| `407` on CONNECT / `401` JSON with `X-Gh-Proxy-Error: PROXY_AUTH_REQUIRED` | Proxy token required — use `GH_PROXY_TOKEN` or ask the user |
 | `403` CONNECT failure for a non-GitHub host | By design: tunnel allows GitHub hosts only |
 | 4xx/5xx **without** `X-Gh-Proxy-Error` header | Real GitHub API error — handle normally (auth, rate limit, etc.) |
 | `gh` says `server gave HTTP response to HTTPS client` with `GH_HOST` set | Don't use `GH_HOST` with this proxy — unset it and use `HTTPS_PROXY` instead |

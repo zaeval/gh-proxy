@@ -55,6 +55,7 @@ PUBLIC_BASE = (스킴)://(PUBLIC_HOST)
 
 - `PUBLIC_HOST`에 스킴이 없으면 `http://`(TLS 미설정 시) 또는 `https://`(TLS 설정 시)가 붙습니다.
 - `PUBLIC_HOST` 미설정 시 `localhost:<PORT>`가 사용됩니다. **다른 머신에서 쓰려면 반드시 설정하세요** — [URL 재작성](#7-url-재작성-규칙)이 이 값을 기준으로 동작합니다.
+- `PUBLIC_HOST`는 **경로 프리픽스를 포함할 수 있습니다** (예: `https://example.com/proxy/gh`). 기존 웹서버가 해당 프리픽스를 제거(strip)하고 gh-proxy로 전달하는 구성을 전제로 하며, 모든 URL 재작성·안내 링크가 프리픽스 포함 주소로 생성됩니다. 이 구성에서는 모드 ①(CONNECT)을 쓸 수 없습니다 — [§5.3](#53-경로-프리픽스-배포에서의-제약) 참고.
 - 이 문서의 예시는 `http://proxy.internal:8788`을 PUBLIC_BASE로 가정합니다.
 
 ## 3. 인증 계층
@@ -142,7 +143,11 @@ export HTTPS_PROXY=http://x:<PROXY_TOKEN>@proxy.internal:8788   # 토큰 있을 
 
 `gh`, `git`, `curl` 등 표준 프록시 환경변수를 따르는 모든 도구가 동작합니다.
 
-### 5.3 절대형 URI (평문 HTTP 포워딩)
+### 5.3 경로 프리픽스 배포에서의 제약
+
+gh-proxy가 nginx 같은 기존 웹서버 뒤의 경로(`https://example.com/proxy/gh`)에 배포된 경우, **모드 ①은 사용할 수 없습니다** — 일반 HTTP 리버스 프록시는 CONNECT 메서드를 중계하지 않으며, `HTTPS_PROXY` 값에는 경로를 넣을 수 없습니다. 이 구성에서는 [모드 ②](#6-모드--리버스-프록시-엔드포인트)가 주 인터페이스이며, 모드 ①이 필요하면 클라이언트가 gh-proxy의 리스닝 포트에 직접 도달할 수 있어야 합니다. `GET /`의 `endpoints.forward_proxy` 필드가 현재 배포에서 CONNECT 사용 가능 여부를 알려줍니다.
+
+### 5.4 절대형 URI (평문 HTTP 포워딩)
 
 `GET http://github.com/... HTTP/1.1` 형태(포워드 프록시의 평문 HTTP 요청)는 허용 호스트에 한해 포트 80으로 패스스루됩니다.
 `https://` 절대형 URI는 **400** (`USE_CONNECT`)으로 거절됩니다 — CONNECT를 사용하세요.

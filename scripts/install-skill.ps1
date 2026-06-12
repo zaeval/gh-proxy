@@ -3,7 +3,8 @@
 #
 #   .\scripts\install-skill.ps1 -ProxyUrl http://proxy.internal:8788
 param(
-    [string]$ProxyUrl = ""
+    [string]$ProxyUrl = "",
+    [string]$ProxyToken = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +19,10 @@ Write-Host "Installed skill: $dst"
 if ($ProxyUrl) {
     [Environment]::SetEnvironmentVariable("GH_PROXY_URL", $ProxyUrl, "User")
     Write-Host "Set user environment variable GH_PROXY_URL=$ProxyUrl"
+    if ($ProxyToken) {
+        [Environment]::SetEnvironmentVariable("GH_PROXY_TOKEN", $ProxyToken, "User")
+        Write-Host "Set user environment variable GH_PROXY_TOKEN=***"
+    }
     Write-Host "(restart terminals for it to take effect)"
 } else {
     Write-Host "Tip: set GH_PROXY_URL so the skill can find the proxy automatically:"

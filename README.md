@@ -170,6 +170,36 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
+## 기존 웹서버(nginx 등) 뒤에 경로 프리픽스로 배포하기
+
+이미 도메인과 TLS를 가진 nginx가 있다면 `https://example.com/proxy/gh` 같은 경로 아래에 붙일 수 있습니다.
+
+```nginx
+location = /proxy/gh { return 301 /proxy/gh/; }
+location ^~ /proxy/gh/ {
+    proxy_pass http://127.0.0.1:8788/;   # trailing slash → prefix 제거
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    client_max_body_size 0;          # git push / 릴리스 자산 업로드
+    proxy_request_buffering off;     # 업로드 스트리밍
+    proxy_buffering off;             # tarball 등 다운로드 스트리밍
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+}
+```
+
+`.env`의 `PUBLIC_HOST`에는 **경로까지 포함한 전체 URL**을 넣습니다:
+
+```ini
+PUBLIC_HOST=https://example.com/proxy/gh
+```
+
+Link 헤더·본문 URL이 이 주소 기준으로 재작성되어 페이지네이션·git clone이 그대로 동작합니다.
+
+> **주의**: 경로 프리픽스 배포에서는 모드 ①(CONNECT, `HTTPS_PROXY`)을 쓸 수 없습니다 — nginx는 CONNECT를 중계하지 않습니다. 이 경우 모드 ②(REST/GraphQL/git 경로)가 주 사용법이며, `HTTPS_PROXY`가 필요하면 프록시 포트(8788)에 직접 접근 가능해야 합니다. 또한 인터넷에 공개되는 배포라면 반드시 `PROXY_TOKEN`을 설정하세요.
+
 ## 알려진 제약
 
 - `GH_HOST=<프록시호스트>` 방식(GitHub Enterprise 에뮬레이션)은 `gh`가 **HTTPS를 강제**하므로 평문 HTTP로는 동작하지 않습니다

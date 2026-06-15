@@ -1,3 +1,7 @@
 .env
 node_modules/
 *.log
+
+# host-specific deployment overrides
+docker-compose.ucut.yml
+docker-compose.override.yml

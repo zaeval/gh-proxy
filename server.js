@@ -512,6 +512,8 @@ function handleServiceInfo(res) {
       git_http: `${PUBLIC_BASE}/{owner}/{repo}.git`,
       health: `${PUBLIC_BASE}/healthz`,
       contract: `${PUBLIC_BASE}/contract`,
+      install: `${PUBLIC_BASE}/install`,
+      skill: `${PUBLIC_BASE}/skill`,
     },
     docs: `${PUBLIC_BASE}/contract`,
     source: 'https://github.com/zaeval/gh-proxy',
@@ -791,6 +793,33 @@ hr { height: 1px; border: 0; background: #d0d7de; margin: 2em 0; }
   .bar a, a { color: #4493f8; }
 }`;
 
+function sendBody(req, res, contentType, text) {
+  const buf = Buffer.from(text, 'utf8');
+  res.writeHead(200, {
+    'content-type': contentType,
+    'content-length': buf.length,
+    via: VIA,
+  });
+  res.end(req.method === 'HEAD' ? undefined : buf);
+}
+
+/** Wrap rendered HTML in the shared page chrome (nav bar + CSS). */
+function htmlPage(title, innerHtml) {
+  return (
+    '<!doctype html>\n<html lang="ko">\n<head>\n' +
+    '<meta charset="utf-8">\n' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+    `<title>${htmlEscape(title)}</title>\n` +
+    `<style>${CONTRACT_CSS}</style>\n</head>\n<body>\n` +
+    `<div class="bar"><span>gh-proxy v${VERSION}</span>` +
+    `<a href="${PUBLIC_BASE}/">service info</a>` +
+    `<a href="${PUBLIC_BASE}/contract">contract</a>` +
+    `<a href="${PUBLIC_BASE}/install">install</a>` +
+    '<a href="https://github.com/zaeval/gh-proxy">GitHub</a></div>\n' +
+    `<main>\n${innerHtml}</main>\n</body>\n</html>\n`
+  );
+}
+
 function handleContract(req, res) {
   const wantRaw = /[?&]raw=1\b/.test(req.url) || req.url.split('?')[0].endsWith('.md');
   let md;
@@ -801,34 +830,216 @@ function handleContract(req, res) {
     return;
   }
   if (wantRaw) {
-    const buf = Buffer.from(md, 'utf8');
-    res.writeHead(200, {
-      'content-type': 'text/markdown; charset=utf-8',
-      'content-length': buf.length,
-      via: VIA,
-    });
-    res.end(req.method === 'HEAD' ? undefined : buf);
+    sendBody(req, res, 'text/markdown; charset=utf-8', md);
     return;
   }
-  const page =
-    '<!doctype html>\n<html lang="ko">\n<head>\n' +
-    '<meta charset="utf-8">\n' +
-    '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
-    `<title>gh-proxy API Contract v${VERSION}</title>\n` +
-    `<style>${CONTRACT_CSS}</style>\n</head>\n<body>\n` +
-    `<div class="bar"><span>gh-proxy v${VERSION}</span>` +
-    `<a href="${PUBLIC_BASE}/">service info</a>` +
-    `<a href="${PUBLIC_BASE}/healthz">health</a>` +
-    `<a href="${PUBLIC_BASE}/contract?raw=1">raw markdown</a>` +
-    '<a href="https://github.com/zaeval/gh-proxy">GitHub</a></div>\n' +
-    `<main>\n${renderMarkdown(md)}</main>\n</body>\n</html>\n`;
-  const buf = Buffer.from(page, 'utf8');
-  res.writeHead(200, {
-    'content-type': 'text/html; charset=utf-8',
-    'content-length': buf.length,
-    via: VIA,
-  });
-  res.end(req.method === 'HEAD' ? undefined : buf);
+  sendBody(
+    req,
+    res,
+    'text/html; charset=utf-8',
+    htmlPage(`gh-proxy API Contract v${VERSION}`, renderMarkdown(md)),
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Skill file + install guide                                          */
+/* ------------------------------------------------------------------ */
+
+const SKILL_FILE = path.join(__dirname, 'skills', 'gh-proxy', 'SKILL.md');
+
+/** Serve the gh-proxy SKILL.md. ?codex=1 strips frontmatter for AGENTS.md use. */
+function handleSkill(req, res) {
+  let md;
+  try {
+    md = fs.readFileSync(SKILL_FILE, 'utf8');
+  } catch (err) {
+    sendProxyError(res, 500, 'SKILL_UNAVAILABLE', `Cannot read skill: ${err.message}`);
+    return;
+  }
+  if (/[?&]codex=1\b/.test(req.url)) {
+    const body = md.replace(/^---\n[\s\S]*?\n---\n/, '');
+    md = `# gh-proxy — use GitHub through a relay (added by gh-proxy installer)\n\n${body}`;
+  }
+  sendBody(req, res, 'text/markdown; charset=utf-8', md);
+}
+
+const INSTALL_SH = `#!/bin/sh
+# gh-proxy installer — installs the gh-proxy skill into Claude Code and/or Codex.
+# Usage:  curl -fsSL ${PUBLIC_BASE}/install.sh | sh           # both
+#         curl -fsSL ${PUBLIC_BASE}/install.sh | sh -s -- claude
+#         curl -fsSL ${PUBLIC_BASE}/install.sh | sh -s -- codex
+set -eu
+BASE="${PUBLIC_BASE}"
+TARGET="\${1:-both}"
+
+fetch() {
+  if command -v curl >/dev/null 2>&1; then curl -fsSL "$1"
+  elif command -v wget >/dev/null 2>&1; then wget -qO- "$1"
+  else echo "gh-proxy: need curl or wget" >&2; exit 1; fi
+}
+
+install_skill() {
+  label="$1"; base_dir="$2"
+  mkdir -p "$base_dir/gh-proxy"
+  fetch "$BASE/skill" > "$base_dir/gh-proxy/SKILL.md"
+  echo "  installed $label -> $base_dir/gh-proxy/SKILL.md"
+}
+
+echo "gh-proxy installer ($BASE)"
+case "$TARGET" in
+  claude|both) install_skill "Claude Code" "$HOME/.claude/skills" ;;
+esac
+case "$TARGET" in
+  codex|both) install_skill "Codex CLI" "$HOME/.codex/skills" ;;
+esac
+
+echo ""
+echo "Add these to your shell profile (the skill reads them):"
+echo "  export GH_PROXY_URL=$BASE"${cfg.proxyToken ? `
+echo "  export GH_PROXY_TOKEN=<the proxy token you were given>"` : ''}
+echo ""
+echo "Restart Claude Code / Codex to load the skill. Docs: $BASE/contract"
+`;
+
+const INSTALL_PS1 = `# gh-proxy installer — installs the gh-proxy skill into Claude Code and/or Codex.
+# Usage:  irm ${PUBLIC_BASE}/install.ps1 | iex            # installs to both
+#         (single target: download then run with 'claude' or 'codex' argument)
+$ErrorActionPreference = "Stop"
+$Base = "${PUBLIC_BASE}"
+$Target = if ($args.Count -ge 1) { $args[0] } else { "both" }
+
+function Install-GhProxySkill($label, $baseDir) {
+  $dir = Join-Path $baseDir "gh-proxy"
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  Invoke-RestMethod "$Base/skill" -OutFile (Join-Path $dir "SKILL.md")
+  Write-Host "  installed $label -> $dir\\SKILL.md"
+}
+
+Write-Host "gh-proxy installer ($Base)"
+if ($Target -in @("claude","both")) { Install-GhProxySkill "Claude Code" "$HOME\\.claude\\skills" }
+if ($Target -in @("codex","both"))  { Install-GhProxySkill "Codex CLI" "$HOME\\.codex\\skills" }
+
+Write-Host ""
+Write-Host "Set these user environment variables (the skill reads them):"
+Write-Host "  setx GH_PROXY_URL $Base"${cfg.proxyToken ? `
+Write-Host "  setx GH_PROXY_TOKEN <the proxy token you were given>"` : ''}
+Write-Host ""
+Write-Host "Restart Claude Code / Codex to load the skill. Docs: $Base/contract"
+`;
+
+function buildInstallGuide() {
+  const B = PUBLIC_BASE;
+  const tokenSection = cfg.proxyToken
+    ? `## 2. 토큰 설정 (필수)
+
+이 프록시는 토큰 인증이 켜져 있습니다. 전달받은 토큰을 환경변수로 설정하세요 —
+스킬이 \`GH_PROXY_URL\`/\`GH_PROXY_TOKEN\`으로 프록시 주소와 토큰을 찾습니다.
+설치 스크립트에는 토큰이 포함되지 않으므로 직접 설정해야 합니다.
+
+\`\`\`sh
+# Linux / macOS / WSL — 셸 프로파일(~/.profile, ~/.zshrc 등)에 추가
+export GH_PROXY_URL=${B}
+export GH_PROXY_TOKEN=<발급받은 토큰>
+\`\`\`
+
+\`\`\`powershell
+# Windows (PowerShell) — 사용자 환경변수로 영구 설정
+[Environment]::SetEnvironmentVariable("GH_PROXY_URL", "${B}", "User")
+[Environment]::SetEnvironmentVariable("GH_PROXY_TOKEN", "<발급받은 토큰>", "User")
+\`\`\`
+`
+    : `## 2. 프록시 주소 설정
+
+스킬이 \`GH_PROXY_URL\`로 프록시 주소를 찾습니다. 이 프록시는 토큰이 필요 없습니다.
+
+\`\`\`sh
+export GH_PROXY_URL=${B}
+\`\`\`
+`;
+
+  return `# gh-proxy 설치 가이드
+
+GitHub에 직접 접근할 수 없는 머신의 **Claude Code** 또는 **Codex CLI**가
+이 프록시(\`${B}\`)를 통해 \`gh\`·\`git\`·GitHub API를 쓰도록 \`gh-proxy\` 스킬을 설치합니다.
+
+Claude Code와 Codex CLI는 **동일한 스킬 포맷(\`SKILL.md\`)**을 사용하므로, 같은 파일을
+각자의 \`skills\` 디렉터리에 넣으면 됩니다.
+
+| 도구 | 설치 위치 |
+|------|-----------|
+| Claude Code | \`~/.claude/skills/gh-proxy/SKILL.md\` |
+| Codex CLI | \`~/.codex/skills/gh-proxy/SKILL.md\` |
+
+## 1. 원터치 설치
+
+### Linux / macOS / WSL
+
+\`\`\`sh
+curl -fsSL ${B}/install.sh | sh           # Claude + Codex 모두
+curl -fsSL ${B}/install.sh | sh -s -- claude   # Claude만
+curl -fsSL ${B}/install.sh | sh -s -- codex    # Codex만
+\`\`\`
+
+### Windows (PowerShell)
+
+\`\`\`powershell
+irm ${B}/install.ps1 | iex
+\`\`\`
+
+> 스크립트를 먼저 검토하려면 [${B}/install.sh](${B}/install.sh) (또는 \`/install.ps1\`)을 열어보세요.
+> 스크립트는 토큰을 포함하지 않으며, \`${B}/skill\`에서 스킬 본문을 내려받아 설치합니다.
+
+${tokenSection}
+## 3. 수동 설치
+
+### Claude Code
+
+\`\`\`sh
+mkdir -p ~/.claude/skills/gh-proxy
+curl -fsSL ${B}/skill -o ~/.claude/skills/gh-proxy/SKILL.md
+\`\`\`
+
+### Codex CLI
+
+\`\`\`sh
+mkdir -p ~/.codex/skills/gh-proxy
+curl -fsSL ${B}/skill -o ~/.codex/skills/gh-proxy/SKILL.md
+\`\`\`
+
+설치 후 **Claude Code / Codex를 재시작**하면 스킬 목록에 \`gh-proxy\`가 나타납니다.
+
+> **대안(Codex 전역 가이드):** 스킬 대신 Codex의 전역 지침에 넣으려면
+> [${B}/skill?codex=1](${B}/skill?codex=1) 의 내용(프론트매터 제거 버전)을
+> \`~/.codex/AGENTS.md\`에 붙여넣으세요. 모든 프로젝트에 적용됩니다.
+
+## 4. 확인
+
+\`\`\`sh
+curl ${B}/healthz
+\`\`\`
+
+설치 후 Claude Code/Codex에게 "gh-proxy로 cli/cli 레포 정보 가져와줘"처럼 요청하면
+스킬이 자동으로 발동합니다. 자세한 사용법은 설치된 \`SKILL.md\`와
+[API 계약 문서](${B}/contract)를 참고하세요.
+`;
+}
+
+function handleInstall(req, res) {
+  const p = req.url.split('?')[0];
+  if (p === '/install.sh') {
+    sendBody(req, res, 'text/x-shellscript; charset=utf-8', INSTALL_SH);
+    return;
+  }
+  if (p === '/install.ps1') {
+    sendBody(req, res, 'text/plain; charset=utf-8', INSTALL_PS1);
+    return;
+  }
+  sendBody(
+    req,
+    res,
+    'text/html; charset=utf-8',
+    htmlPage('gh-proxy 설치 가이드', renderMarkdown(buildInstallGuide())),
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -924,6 +1135,22 @@ function handleRequest(req, res) {
     (req.method === 'GET' || req.method === 'HEAD')
   ) {
     handleContract(req, res);
+    return;
+  }
+  if (
+    (pathOnly === '/skill' || pathOnly === '/skill.md') &&
+    (req.method === 'GET' || req.method === 'HEAD')
+  ) {
+    handleSkill(req, res);
+    return;
+  }
+  if (
+    (pathOnly === '/install' ||
+      pathOnly === '/install.sh' ||
+      pathOnly === '/install.ps1') &&
+    (req.method === 'GET' || req.method === 'HEAD')
+  ) {
+    handleInstall(req, res);
     return;
   }
 

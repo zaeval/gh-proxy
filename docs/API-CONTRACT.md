@@ -161,6 +161,8 @@ gh-proxy가 nginx 같은 기존 웹서버 뒤의 경로(`https://example.com/pro
 | `GET /` | — | 서비스 정보 | — |
 | `GET /healthz` | — | 헬스체크 | — |
 | `GET /contract` | — | 이 계약 문서 (HTML 렌더링, `?raw=1`=원본) | — |
+| `GET /install` | — | 설치 가이드(HTML); `/install.sh`·`/install.ps1`=설치 스크립트 | — |
+| `GET /skill` | — | `gh-proxy` 스킬 `SKILL.md` (`?codex=1`=프론트매터 제거) | — |
 | `/api/v3/{path}` | `https://api.github.com/{path}` | REST API | ✅ |
 | `/api/graphql`, `/api/v3/graphql` | `https://api.github.com/graphql` | GraphQL | ✅ |
 | `/api/uploads/{path}` | `https://uploads.github.com/{path}` | 릴리스 자산 업로드 | — |
@@ -210,6 +212,26 @@ gh-proxy가 nginx 같은 기존 웹서버 뒤의 경로(`https://example.com/pro
 - `Content-Type: text/html; charset=utf-8`
 - `?raw=1` 또는 `/contract.md` → 원본 마크다운(`text/markdown; charset=utf-8`)
 - 문서 내 저장소 상대 링크(`../server.js` 등)는 GitHub 저장소 URL로 재작성됩니다.
+
+### 6.2.2 `GET /install`, `/skill` — 스킬 설치
+
+GitHub 접근이 막힌 머신의 **Claude Code/Codex CLI**에 `gh-proxy` 스킬을 설치하기 위한 엔드포인트. 모두 인증 면제.
+
+| 경로 | 응답 |
+|------|------|
+| `GET /install` | 설치 가이드 (HTML 렌더링) |
+| `GET /install.sh` | POSIX 설치 스크립트 (`text/x-shellscript`). `sh -s -- claude\|codex\|both` 인자 지원 |
+| `GET /install.ps1` | PowerShell 설치 스크립트 |
+| `GET /skill` | `gh-proxy` 스킬 `SKILL.md` 원본 (`text/markdown`) |
+| `GET /skill?codex=1` | 동일하되 YAML 프론트매터 제거(+제목 추가) — Codex `AGENTS.md` 붙여넣기용 |
+
+- 설치 스크립트에는 `PUBLIC_BASE`가 채워져 있으나 **`PROXY_TOKEN`은 포함하지 않습니다**. 클라이언트는 `GH_PROXY_URL`/`GH_PROXY_TOKEN` 환경변수를 직접 설정합니다.
+- Claude Code와 Codex는 동일한 스킬 포맷(`SKILL.md`)을 사용하며, 설치 위치는 각각 `~/.claude/skills/gh-proxy/`, `~/.codex/skills/gh-proxy/` 입니다.
+
+```sh
+curl -fsSL ${PUBLIC_BASE}/install.sh | sh           # Claude + Codex
+curl -fsSL ${PUBLIC_BASE}/install.sh | sh -s -- codex
+```
 
 ### 6.3 `/api/v3/{path}` — GitHub REST API
 

@@ -1,0 +1,20 @@
+# Generic standalone deployment.
+#   cp .env.example .env   # set PUBLIC_HOST (and PROXY_TOKEN)
+#   docker compose up -d --build
+#
+# To place gh-proxy behind an existing reverse proxy on a shared Docker
+# network (so the front nginx can reach it by name with no published port),
+# see docs/API-CONTRACT.md §5.3 and the README "WSL/Docker" section.
+services:
+  gh-proxy:
+    build: .
+    image: gh-proxy
+    container_name: gh-proxy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BIND_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8788:8788"
+    restart: unless-stopped

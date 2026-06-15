@@ -101,22 +101,41 @@ curl -X POST -H "Authorization: Bearer <토큰>" -d '{"query":"query{viewer{logi
      http://<프록시호스트>:8788/api/graphql
 ```
 
-## Claude Code 스킬 설치 (클라이언트 PC)
+## 스킬 설치 — Claude Code & Codex (클라이언트 PC)
 
-클라이언트 PC의 Claude Code가 이 프록시 사용법을 알도록 `gh-proxy` 스킬을 설치할 수 있습니다.
+클라이언트 PC의 **Claude Code** 또는 **Codex CLI**가 이 프록시 사용법을 알도록 `gh-proxy`
+스킬을 설치합니다. 두 도구는 동일한 `SKILL.md` 포맷을 쓰므로 같은 파일을 각자의 skills
+디렉터리(`~/.claude/skills/gh-proxy/`, `~/.codex/skills/gh-proxy/`)에 넣으면 됩니다.
+
+**실행 중인 서버에서 원터치 설치** — 서버가 자기 주소를 채워 넣은 설치 스크립트를 제공합니다:
+
+```sh
+# Linux / macOS / WSL  (둘 다 / 한쪽만)
+curl -fsSL http://<프록시호스트>:8788/install.sh | sh
+curl -fsSL http://<프록시호스트>:8788/install.sh | sh -s -- claude
+curl -fsSL http://<프록시호스트>:8788/install.sh | sh -s -- codex
+```
 
 ```powershell
 # Windows
-.\scripts\install-skill.ps1 -ProxyUrl http://<프록시호스트>:8788
+irm http://<프록시호스트>:8788/install.ps1 | iex
+```
+
+설치 안내 페이지(HTML)는 브라우저에서 **`<PUBLIC_BASE>/install`** 로 볼 수 있습니다.
+토큰이 설정된 프록시라면 설치 후 `GH_PROXY_URL`·`GH_PROXY_TOKEN` 환경변수를 지정하세요(스크립트는 토큰을 포함하지 않습니다).
+
+**저장소 체크아웃에서 설치** (스크립트 사용):
+
+```powershell
+.\scripts\install-skill.ps1 -ProxyUrl http://<프록시호스트>:8788 -Target both
 ```
 
 ```sh
-# macOS / Linux
-./scripts/install-skill.sh http://<프록시호스트>:8788
+./scripts/install-skill.sh http://<프록시호스트>:8788 both
 ```
 
-수동 설치: [skills/gh-proxy](skills/gh-proxy/SKILL.md) 디렉터리를 `~/.claude/skills/gh-proxy`로 복사한 뒤,
-환경변수 `GH_PROXY_URL=http://<프록시호스트>:8788` 을 설정해 두면 Claude가 프록시 주소를 바로 찾습니다.
+수동 설치: `curl -fsSL <PUBLIC_BASE>/skill -o ~/.claude/skills/gh-proxy/SKILL.md`
+(Codex는 `~/.codex/skills/gh-proxy/SKILL.md`). 자세한 안내는 `<PUBLIC_BASE>/install` 참고.
 
 ## 환경변수 (.env)
 
@@ -199,6 +218,51 @@ PUBLIC_HOST=https://example.com/proxy/gh
 Link 헤더·본문 URL이 이 주소 기준으로 재작성되어 페이지네이션·git clone이 그대로 동작합니다.
 
 > **주의**: 경로 프리픽스 배포에서는 모드 ①(CONNECT, `HTTPS_PROXY`)을 쓸 수 없습니다 — nginx는 CONNECT를 중계하지 않습니다. 이 경우 모드 ②(REST/GraphQL/git 경로)가 주 사용법이며, `HTTPS_PROXY`가 필요하면 프록시 포트(8788)에 직접 접근 가능해야 합니다. 또한 인터넷에 공개되는 배포라면 반드시 `PROXY_TOKEN`을 설정하세요.
+
+## Docker / WSL 배포
+
+이미지에 런타임 의존성이 없어 Docker 빌드가 매우 가볍습니다.
+
+```sh
+cp .env.example .env        # PUBLIC_HOST, (필요 시) PROXY_TOKEN 설정
+docker compose up -d --build
+# 기본 compose는 127.0.0.1:8788 로 노출 (standalone)
+```
+
+**프론트 nginx가 Docker 컨테이너인 경우** — gh-proxy를 같은 Docker 네트워크에 올리면
+nginx가 호스트 게이트웨이 IP 대신 **컨테이너 이름으로 직접** 도달할 수 있어, WSL/호스트
+IP가 바뀌어도 끊기지 않습니다. nginx가 속한 외부 네트워크에 join 하는 compose 예시:
+
+```yaml
+# docker-compose.ucut.yml  (배포 호스트 전용, 커밋하지 않음)
+services:
+  gh-proxy:
+    build: .
+    container_name: gh-proxy
+    env_file: [.env]
+    environment: { BIND_HOST: 0.0.0.0 }
+    restart: unless-stopped
+    networks: [nginxnet]
+networks:
+  nginxnet:
+    external: true
+    name: <프론트-nginx-의-네트워크>   # 예: nginx-proxy_default
+```
+
+```sh
+docker compose -f docker-compose.ucut.yml up -d --build
+```
+
+그리고 nginx는 컨테이너 이름으로 프록시합니다:
+
+```nginx
+location ^~ /proxy/gh/ { proxy_pass http://gh-proxy:8788/; ... }
+```
+
+> 이 저장소의 실제 배포(`ucut.in`)가 이 구성입니다: WSL Docker의 nginx가
+> `nginx-proxy_default` 네트워크에서 `gh-proxy` 컨테이너로 프록시하고, 백엔드는
+> 컨테이너 안에서 GitHub로 중계합니다. (WSL은 Windows 네트워크를 공유하므로
+> 컨테이너에서 github.com 도달 가능.)
 
 ## 알려진 제약
 

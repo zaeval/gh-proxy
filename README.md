@@ -21,7 +21,7 @@
 | **① 포워드 프록시 (CONNECT 터널)** — 권장 | 클라이언트에서 `HTTPS_PROXY=http://<프록시호스트>:8788` 만 설정 | `gh`·`git`이 **수정 없이 그대로** 동작. TLS는 클라이언트↔GitHub 종단간 유지 |
 | **② 리버스 프록시 (REST 패스스루)** | `http://<프록시호스트>:8788/api/v3/...` 등으로 직접 호출 | `curl`/스크립트로 GitHub API 호출, `git clone http://<프록시호스트>:8788/owner/repo.git` |
 
-상세한 엔드포인트 명세는 **[docs/API-CONTRACT.md](docs/API-CONTRACT.md)** 를 참고하세요.
+상세한 엔드포인트 명세는 **[docs/API-CONTRACT.md](docs/API-CONTRACT.md)** 를 참고하세요. 실행 중인 서버에서는 같은 문서를 브라우저에서 바로 볼 수 있습니다 — **`<PUBLIC_BASE>/contract`** (HTML 렌더링, `?raw=1`로 원본 마크다운). 이 엔드포인트는 토큰 없이 열람 가능합니다.
 
 ## 빠른 시작
 

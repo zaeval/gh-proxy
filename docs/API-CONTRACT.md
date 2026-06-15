@@ -160,6 +160,7 @@ gh-proxy가 nginx 같은 기존 웹서버 뒤의 경로(`https://example.com/pro
 |-------------|----------|------|:---:|
 | `GET /` | — | 서비스 정보 | — |
 | `GET /healthz` | — | 헬스체크 | — |
+| `GET /contract` | — | 이 계약 문서 (HTML 렌더링, `?raw=1`=원본) | — |
 | `/api/v3/{path}` | `https://api.github.com/{path}` | REST API | ✅ |
 | `/api/graphql`, `/api/v3/graphql` | `https://api.github.com/graphql` | GraphQL | ✅ |
 | `/api/uploads/{path}` | `https://uploads.github.com/{path}` | 릴리스 자산 업로드 | — |
@@ -201,6 +202,14 @@ gh-proxy가 nginx 같은 기존 웹서버 뒤의 경로(`https://example.com/pro
 ```
 
 업스트림 도달 불가 시 `status`는 `"degraded"`, `upstream.reachable`은 `false`가 되며 HTTP 상태코드는 그대로 200입니다 (프록시 프로세스 자체는 살아있으므로).
+
+### 6.2.1 `GET /contract` — 이 계약 문서
+
+인증 불필요. 이 문서(`docs/API-CONTRACT.md`)를 서버에서 HTML로 렌더링해 돌려줍니다. 외부 의존성 없이 server.js 내장 렌더러가 처리하며, 헤딩 앵커는 GitHub 호환 슬러그라 본문 목차 링크가 그대로 동작합니다.
+
+- `Content-Type: text/html; charset=utf-8`
+- `?raw=1` 또는 `/contract.md` → 원본 마크다운(`text/markdown; charset=utf-8`)
+- 문서 내 저장소 상대 링크(`../server.js` 등)는 GitHub 저장소 URL로 재작성됩니다.
 
 ### 6.3 `/api/v3/{path}` — GitHub REST API
 

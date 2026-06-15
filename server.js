@@ -511,8 +511,10 @@ function handleServiceInfo(res) {
       raw: `${PUBLIC_BASE}/raw/{owner}/{repo}/{ref}/{path}`,
       git_http: `${PUBLIC_BASE}/{owner}/{repo}.git`,
       health: `${PUBLIC_BASE}/healthz`,
+      contract: `${PUBLIC_BASE}/contract`,
     },
-    docs: 'https://github.com/zaeval/gh-proxy/blob/main/docs/API-CONTRACT.md',
+    docs: `${PUBLIC_BASE}/contract`,
+    source: 'https://github.com/zaeval/gh-proxy',
   });
 }
 
@@ -558,6 +560,275 @@ function handleHealthz(req, res) {
     });
   });
   probe.end();
+}
+
+/* ------------------------------------------------------------------ */
+/* Contract documentation (rendered Markdown, zero dependencies)       */
+/* ------------------------------------------------------------------ */
+
+const CONTRACT_FILE = path.join(__dirname, 'docs', 'API-CONTRACT.md');
+const GH_BLOB_BASE = 'https://github.com/zaeval/gh-proxy/blob/main';
+
+const htmlEscape = (s) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** GitHub-compatible heading slug (so the doc's TOC anchors resolve). */
+function slugify(s) {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s/g, '-');
+}
+
+/** Inline markdown: code spans, bold, links. Repo-relative links -> GitHub. */
+function renderInline(text) {
+  const codes = [];
+  let s = text.replace(/`([^`]+)`/g, (_, c) => {
+    codes.push(c);
+    return `\u0000${codes.length - 1}\u0000`;
+  });
+  s = htmlEscape(s);
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
+    let href = url;
+    if (/^#/.test(url)) {
+      href = url; // in-page anchor
+    } else if (!/^[a-z]+:/i.test(url)) {
+      // repo-relative path (e.g. ../server.js, ../README.md#x) -> GitHub blob
+      href = `${GH_BLOB_BASE}/${url.replace(/^(\.\.\/)+/, '').replace(/^\.\//, '')}`;
+    }
+    return `<a href="${href}">${label}</a>`;
+  });
+  s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${htmlEscape(codes[i])}</code>`);
+  return s;
+}
+
+/** Minimal block-level Markdown -> HTML, scoped to features used in the doc. */
+function renderMarkdown(md) {
+  const lines = md.replace(/\r\n/g, '\n').split('\n');
+  let html = '';
+  let i = 0;
+  const isBlockStart = (l) =>
+    /^(#{1,6}\s|```|>|\s*[-*]\s|\s*\d+\.\s)/.test(l) ||
+    /^(-{3,}|\*{3,}|_{3,})\s*$/.test(l) ||
+    l.includes('|');
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    const fence = line.match(/^```(\w*)/);
+    if (fence) {
+      i++;
+      const code = [];
+      while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]);
+      i++; // closing fence
+      html += `<pre><code>${htmlEscape(code.join('\n'))}</code></pre>\n`;
+      continue;
+    }
+
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      const level = h[1].length;
+      const text = h[2].replace(/\s+#+\s*$/, '');
+      html += `<h${level} id="${slugify(text)}">${renderInline(text)}</h${level}>\n`;
+      i++;
+      continue;
+    }
+
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+      html += '<hr>\n';
+      i++;
+      continue;
+    }
+
+    // GFM pipe table: header row followed by a |---|---| separator row.
+    if (
+      line.includes('|') &&
+      i + 1 < lines.length &&
+      lines[i + 1].includes('-') &&
+      /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])
+    ) {
+      const parseRow = (l) =>
+        l
+          .replace(/^\s*\|/, '')
+          .replace(/\|\s*$/, '')
+          .split('|')
+          .map((c) => c.trim());
+      const headers = parseRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+        rows.push(parseRow(lines[i]));
+        i++;
+      }
+      html +=
+        '<table>\n<thead><tr>' +
+        headers.map((c) => `<th>${renderInline(c)}</th>`).join('') +
+        '</tr></thead>\n<tbody>\n' +
+        rows
+          .map(
+            (r) =>
+              '<tr>' + r.map((c) => `<td>${renderInline(c)}</td>`).join('') + '</tr>',
+          )
+          .join('\n') +
+        '\n</tbody>\n</table>\n';
+      continue;
+    }
+
+    if (/^>\s?/.test(line)) {
+      const quote = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quote.push(lines[i].replace(/^>\s?/, ''));
+        i++;
+      }
+      html += `<blockquote>${renderInline(quote.join(' '))}</blockquote>\n`;
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*]\s+/, ''));
+        i++;
+      }
+      html +=
+        '<ul>\n' +
+        items.map((it) => `<li>${renderInline(it)}</li>`).join('\n') +
+        '\n</ul>\n';
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+        i++;
+      }
+      html +=
+        '<ol>\n' +
+        items.map((it) => `<li>${renderInline(it)}</li>`).join('\n') +
+        '\n</ol>\n';
+      continue;
+    }
+
+    if (line.trim() === '') {
+      i++;
+      continue;
+    }
+
+    const para = [line];
+    i++;
+    while (i < lines.length && lines[i].trim() !== '' && !isBlockStart(lines[i])) {
+      para.push(lines[i]);
+      i++;
+    }
+    html += `<p>${renderInline(para.join(' '))}</p>\n`;
+  }
+  return html;
+}
+
+const CONTRACT_CSS = `
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 2.2rem 1.2rem 5rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR",
+    Helvetica, Arial, sans-serif;
+  line-height: 1.66; color: #1f2328; background: #ffffff;
+  -webkit-text-size-adjust: 100%;
+}
+main { max-width: 60rem; margin: 0 auto; }
+.bar {
+  max-width: 60rem; margin: 0 auto 1.6rem; padding-bottom: 1rem;
+  border-bottom: 1px solid #d0d7de; font-size: .86rem; color: #59636e;
+  display: flex; gap: 1rem; flex-wrap: wrap;
+}
+.bar a { color: #0969da; text-decoration: none; }
+.bar a:hover { text-decoration: underline; }
+h1, h2, h3, h4 { line-height: 1.3; margin: 1.8em 0 .6em; font-weight: 600; }
+h1 { font-size: 1.9rem; margin-top: .2em; }
+h2 { font-size: 1.45rem; padding-bottom: .3em; border-bottom: 1px solid #d0d7de; }
+h3 { font-size: 1.18rem; }
+h4 { font-size: 1rem; }
+h1, h2, h3, h4 { scroll-margin-top: 1rem; }
+p { margin: .7em 0; }
+a { color: #0969da; }
+code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: .88em; background: rgba(129,139,152,.16);
+  padding: .15em .4em; border-radius: 6px;
+}
+pre {
+  background: #f6f8fa; border-radius: 8px; padding: 1rem; overflow: auto;
+  border: 1px solid #d0d7de;
+}
+pre code { background: none; padding: 0; font-size: .85em; line-height: 1.5; }
+table {
+  border-collapse: collapse; width: 100%; margin: 1em 0; display: block;
+  overflow-x: auto; font-size: .92rem;
+}
+th, td { border: 1px solid #d0d7de; padding: .5em .8em; text-align: left; vertical-align: top; }
+th { background: #f6f8fa; font-weight: 600; }
+tr:nth-child(2n) td { background: #f6f8fa66; }
+blockquote {
+  margin: 1em 0; padding: .3em 1em; color: #59636e;
+  border-left: .25em solid #d0d7de;
+}
+ul, ol { padding-left: 1.6em; }
+li { margin: .25em 0; }
+hr { height: 1px; border: 0; background: #d0d7de; margin: 2em 0; }
+@media (prefers-color-scheme: dark) {
+  body { color: #e6edf3; background: #0d1117; }
+  .bar { border-color: #30363d; color: #9198a1; }
+  h2 { border-color: #30363d; }
+  code { background: rgba(110,118,129,.4); }
+  pre { background: #161b22; border-color: #30363d; }
+  th, td { border-color: #30363d; }
+  th { background: #161b22; }
+  tr:nth-child(2n) td { background: #161b2255; }
+  blockquote { color: #9198a1; border-color: #30363d; }
+  hr { background: #30363d; }
+  .bar a, a { color: #4493f8; }
+}`;
+
+function handleContract(req, res) {
+  const wantRaw = /[?&]raw=1\b/.test(req.url) || req.url.split('?')[0].endsWith('.md');
+  let md;
+  try {
+    md = fs.readFileSync(CONTRACT_FILE, 'utf8');
+  } catch (err) {
+    sendProxyError(res, 500, 'CONTRACT_UNAVAILABLE', `Cannot read contract: ${err.message}`);
+    return;
+  }
+  if (wantRaw) {
+    const buf = Buffer.from(md, 'utf8');
+    res.writeHead(200, {
+      'content-type': 'text/markdown; charset=utf-8',
+      'content-length': buf.length,
+      via: VIA,
+    });
+    res.end(req.method === 'HEAD' ? undefined : buf);
+    return;
+  }
+  const page =
+    '<!doctype html>\n<html lang="ko">\n<head>\n' +
+    '<meta charset="utf-8">\n' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+    `<title>gh-proxy API Contract v${VERSION}</title>\n` +
+    `<style>${CONTRACT_CSS}</style>\n</head>\n<body>\n` +
+    `<div class="bar"><span>gh-proxy v${VERSION}</span>` +
+    `<a href="${PUBLIC_BASE}/">service info</a>` +
+    `<a href="${PUBLIC_BASE}/healthz">health</a>` +
+    `<a href="${PUBLIC_BASE}/contract?raw=1">raw markdown</a>` +
+    '<a href="https://github.com/zaeval/gh-proxy">GitHub</a></div>\n' +
+    `<main>\n${renderMarkdown(md)}</main>\n</body>\n</html>\n`;
+  const buf = Buffer.from(page, 'utf8');
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': buf.length,
+    via: VIA,
+  });
+  res.end(req.method === 'HEAD' ? undefined : buf);
 }
 
 /* ------------------------------------------------------------------ */
@@ -646,6 +917,13 @@ function handleRequest(req, res) {
   }
   if (pathOnly === '/healthz' && (req.method === 'GET' || req.method === 'HEAD')) {
     handleHealthz(req, res);
+    return;
+  }
+  if (
+    (pathOnly === '/contract' || pathOnly === '/contract.md') &&
+    (req.method === 'GET' || req.method === 'HEAD')
+  ) {
+    handleContract(req, res);
     return;
   }
 
